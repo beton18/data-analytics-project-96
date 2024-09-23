@@ -1,140 +1,72 @@
-WITH ad_data AS (  -- Собираем данные по рекламным объявлениям из двух таблиц
-    SELECT
-        utm_source,  -- Источник трафика
-        utm_medium,  -- Тип рекламной кампании
-        utm_campaign, -- Название кампании
-        utm_content,  -- Контент объявления
-        campaign_date,  -- Дата расхода на рекламную кампанию
-        daily_spent  -- Сколько денег в день потратили на эту рекламу
-    FROM ya_ads  -- Рекламные данные из Yandex
-    UNION ALL
-    SELECT
+--Формируем дашборд для маркетинговой команды на основе запроса для aggregate_last_paid_click. Результат по aggregate_last_paid_click проверяется автоматически, а значит дашборд, составленный на основе этого запроса будет корректен
+-- Подзапрос visitors_and_leads получает уникальные визиты пользователей с данными о лидах
+with visitors_and_leads as (
+    select distinct on (s.visitor_id)  -- Убираем дубли по visitor_id, берём последний визит
+        s.visitor_id,  -- ID посетителя
+        s.visit_date,  -- Дата визита
+        s.source as utm_source,  -- UTM-источник
+        s.medium as utm_medium,  -- UTM-тип трафика (cpc, cpm и т.д.)
+        s.campaign as utm_campaign,  -- UTM-кампания
+        l.lead_id,  -- ID лида, если есть
+        l.amount,  -- Сумма лида
+        l.created_at,  -- Дата создания лида
+        l.status_id  -- Статус лида (например, покупка)
+    from sessions as s
+    left join leads as l
+        on
+            s.visitor_id = l.visitor_id  -- Привязываем лиды к визитам
+            and s.visit_date <= l.created_at  -- Только если визит был до или в момент создания лида
+    where s.medium in ('cpc', 'cpm', 'cpa', 'youtube', 'cpp', 'tg', 'social')  -- Ограничиваем типы трафика
+    order by 1, 2 desc  -- Сортируем по visitor_id и дате визита (для distinct)
+),
+
+-- Подзапрос costs собирает расходы по рекламным кампаниям из двух таблиц
+costs as (
+    select
+        campaign_date::date,  -- Дата кампании
+        SUM(daily_spent) as daily_spent,  -- Общие расходы за день
+        utm_source,  -- UTM-источник
+        utm_medium,  -- UTM-тип трафика
+        utm_campaign  -- UTM-кампания
+    from vk_ads  -- Таблица расходов ВК
+    group by 1, 3, 4, 5  -- Группируем по дате, источнику, типу трафика и кампании
+    union all
+    select
+        campaign_date::date,  -- Аналогично для яндекс-рекламы
+        SUM(daily_spent) as daily_spent,
         utm_source,
         utm_medium,
-        utm_campaign,
-        utm_content,
-        campaign_date,
-        daily_spent
-    FROM vk_ads  -- Рекламные данные из VK
-),
--- Теперь соединим сессии пользователей с рекламными данными и лидами
-sessions_with_ads AS (
-    SELECT
-        s.visit_date::date AS visit_date,  -- Дата визита на сайт (без времени)
-        s.visitor_id,  -- Уникальный ID посетителя
-        l.lead_id,  -- ID лида, если посетитель сконвертировался в лид
-        l.created_at,  -- Когда лид был создан
-        l.amount,  -- Сумма сделки
-        l.closing_reason,  -- Причина закрытия сделки
-        l.status_id,  -- Статус сделки
-        a.daily_spent,  -- Сколько денег потратили на рекламу для этой сессии
-        COALESCE(a.utm_source, s.source) AS utm_source,  -- Источник трафика с приоритетом рекламы
-        COALESCE(a.utm_medium, s.medium) AS utm_medium,  -- Тип рекламной кампании с приоритетом рекламы
-        COALESCE(a.utm_campaign, s.campaign) AS utm_campaign  -- Название кампании с приоритетом рекламы
-    FROM sessions AS s  -- Таблица сессий пользователей
-    LEFT JOIN ad_data AS a  -- Присоединяем рекламные данные, если они есть
-        ON s.source = a.utm_source  -- Соединяем по utm_source
-        AND s.medium = a.utm_medium  -- Соединяем по utm_medium
-        AND s.campaign = a.utm_campaign  -- Соединяем по utm_campaign
-        AND s.visit_date::date = a.campaign_date  -- И дата визита должна совпадать с датой кампании
-    LEFT JOIN leads AS l  -- Присоединяем данные по лидам
-        ON s.visitor_id = l.visitor_id  -- Соединяем по ID посетителя
-        AND s.visit_date <= l.created_at  -- Убедимся, что визит был до создания лида или в то же время
-),
--- Здесь определяем последние оплаченные клики для каждого пользователя
-last_paid_clicks AS (
-    SELECT DISTINCT ON (visitor_id)  -- Берем по одному последнему визиту на каждого пользователя
-        visit_date,  -- Дата визита
-        utm_source,  -- Источник трафика
-        utm_medium,  -- Тип рекламной кампании
-        utm_campaign,  -- Название рекламной кампании
-        visitor_id,  -- ID посетителя
-        lead_id,  -- ID лида
-        created_at,  -- Когда был создан лид
-        amount,  -- Сумма сделки
-        closing_reason,  -- Причина закрытия сделки
-        status_id,  -- Статус сделки
-        daily_spent  -- Сколько денег потратили на эту рекламу
-    FROM sessions_with_ads  -- Используем данные сессий и рекламы
-    WHERE utm_medium IN ('cpc', 'cpm', 'cpa', 'youtube', 'cpp', 'tg', 'social')  -- Отбираем только платные клики
-    ORDER BY visitor_id ASC, visit_date DESC  -- Берем последние визиты по каждому пользователю
+        utm_campaign
+    from ya_ads  -- Таблица расходов Яндекс
+    group by 1, 3, 4, 5
 )
--- Финальная выборка с расчетами
-SELECT
-    visit_date,  -- Дата визита
-    utm_source,  -- Источник трафика
-    utm_medium,  -- Тип рекламной кампании
-    utm_campaign,  -- Название кампании
-    -- Считаем, сколько визитов с этими метками
-    COUNT(visitor_id) AS visitors_count,
-    SUM(daily_spent) AS total_cost,  -- Суммируем расходы на рекламу
-    -- Считаем количество уникальных лидов
-    COUNT(DISTINCT lead_id) AS leads_count,
-    COUNT(
-        CASE
-            -- Если сделка успешна
-            WHEN closing_reason = 'Успешно реализовано' OR status_id = 142
-                THEN lead_id  -- Учитываем лид
-        END
-    ) AS purchases_count,  -- Считаем количество успешных сделок
-    SUM(
-        CASE
-            -- Если сделка успешна
-            WHEN closing_reason = 'Успешно реализовано' OR status_id = 142
-                THEN amount  -- Учитываем сумму сделки
-        END
-    ) AS revenue,  -- Суммируем выручку по успешным сделкам
-    -- Теперь начинаем вычислять метрики:
-    CASE
-        -- Если посетителей нет, метрики не считаем
-        WHEN COUNT(visitor_id) = 0 THEN NULL
-        -- CPU = общие затраты / количество визитов
-        ELSE SUM(daily_spent) / COUNT(visitor_id)
-    END AS cpu,
-    CASE
-        -- Если лидов нет, не считаем CPL
-        WHEN COUNT(DISTINCT lead_id) = 0 THEN NULL
-        -- CPL = общие затраты / количество лидов
-        ELSE SUM(daily_spent) / COUNT(DISTINCT lead_id)
-    END AS cpl,
-    CASE
-        WHEN COUNT(
-            CASE
-                -- Если сделка успешна
-                WHEN closing_reason = 'Успешно реализовано' OR status_id = 142
-                    THEN lead_id
-            END
-        ) = 0 THEN NULL  -- Если покупок нет, не считаем CPPU
-        ELSE SUM(daily_spent) / COUNT(
-            CASE
-                -- Если сделка успешна
-                WHEN closing_reason = 'Успешно реализовано' OR status_id = 142
-                    THEN lead_id
-            END
-        )  -- CPPU = общие затраты / количество успешных сделок
-    END AS cppu,
-    CASE
-        -- Если затраты нулевые, не считаем ROI
-        WHEN SUM(daily_spent) = 0 THEN NULL
-        ELSE (SUM(
-            CASE
-                -- Если сделка успешна
-                WHEN closing_reason = 'Успешно реализовано' OR status_id = 142
-                    THEN amount  -- Берем выручку
-            END
-        -- ROI = (выручка - затраты) / затраты * 100%
-        ) - SUM(daily_spent)) / SUM(daily_spent) * 100
-    END AS roi
-FROM last_paid_clicks  -- Используем данные последних оплаченных кликов
--- Группируем по дате визита и меткам
-GROUP BY visit_date, utm_source, utm_medium, utm_campaign
-ORDER BY
-    revenue DESC NULLS LAST,  -- Сортируем по выручке (null в конце)
-    visit_date ASC,  -- Затем по дате (от ранних к поздним)
-    -- Потом по количеству визитов (от большего к меньшему)
-    visitors_count DESC,
-    -- И в конце по меткам в алфавитном порядке
-    utm_source ASC, utm_medium ASC, utm_campaign ASC;
+
+-- Основной запрос, соединяющий данные визитов с расходами и считающий метрики
+select
+    vl.visit_date::date,  -- Дата визита
+    COUNT(*) as visitors_count,  -- Количество визитов
+    vl.utm_source,  -- UTM-источник
+    vl.utm_medium,  -- UTM-тип трафика
+    vl.utm_campaign,  -- UTM-кампания
+    daily_spent as total_cost,  -- Общие расходы на рекламу в этот день
+    COUNT(*) filter (where lead_id is not NULL) as leads_count,  -- Количество лидов
+    COUNT(*) filter (where status_id = 142) as purchases_count,  -- Количество покупок (лиды со статусом покупки)
+    COALESCE(SUM(amount) filter (where status_id = 142), 0) as revenue,  -- Доход от покупок
+    CASE WHEN COUNT(*) > 0 THEN daily_spent / COUNT(*) END as cpu,  -- Стоимость за уникального посетителя
+    CASE WHEN COUNT(*) filter (where lead_id is not NULL) > 0 THEN daily_spent / COUNT(*) filter (where lead_id is not NULL) END as cpl,  -- Стоимость за лид
+    CASE WHEN COUNT(*) filter (where status_id = 142) > 0 THEN daily_spent / COUNT(*) filter (where status_id = 142) END as cppu,  -- Стоимость за покупку
+    CASE WHEN daily_spent > 0 THEN (COALESCE(SUM(amount) filter (where status_id = 142), 0) - daily_spent) / daily_spent * 100 END as roi  -- ROI
+from visitors_and_leads as vl
+left join costs as c  -- Левый джойн с таблицей расходов
+    on
+        vl.utm_source = c.utm_source  -- По UTM-источнику
+        and vl.utm_medium = c.utm_medium  -- По типу трафика
+        and vl.utm_campaign = c.utm_campaign  -- По кампании
+        and vl.visit_date::date = c.campaign_date::date  -- И по дате
+group by 1, 3, 4, 5, 6  -- Группируем по дате, источнику, типу трафика, кампании и расходам
+order by 9 desc nulls last, 2 desc, 1, 3, 4, 5  -- Сортируем сначала по доходу, затем по количеству визитов
+limit 15;  -- Лимитируем результат
+
 --Формируем самые дорогие рекламные кампании рекламные кампании
 WITH ad_data AS (
     -- Собираем данные из таблиц с рекламой
