@@ -59,16 +59,8 @@ select
 --Количество лидов
     COUNT(*) filter (where status_id = 142) as purchases_count,
 --Количество покупок (лиды со статусом покупки)
-    COALESCE(SUM(amount) filter (where status_id = 142), 0) as revenue,
+    COALESCE(SUM(amount) filter (where status_id = 142), 0) as revenue
 --Доход от покупок
-CASE WHEN COUNT(*) > 0 THEN daily_spent / COUNT(*) END as cpu,
---Стоимость за уникального посетителя
-CASE WHEN COUNT(*) filter (where lead_id is not NULL) > 0 THEN daily_spent / COUNT(*) filter (where lead_id is not NULL) END as cpl,
---лид
-CASE WHEN COUNT(*) filter (where status_id = 142) > 0 THEN daily_spent / COUNT(*) filter (where status_id = 142) END as cppu,
---оплата
-CASE WHEN daily_spent > 0 THEN (COALESCE(SUM(amount) filter (where status_id = 142), 0) - daily_spent) / daily_spent * 100 END as roi
---ROI
 from visitors_and_leads as vl
 left join costs as c  -- Левый джойн с таблицей расходов
     on
