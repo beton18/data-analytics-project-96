@@ -19,7 +19,7 @@ with visitors_and_leads as (
     from sessions as s
     left join leads as l
         on
-            s.visitor_id = l.visitor_id -- Привязываем лиды к визитам
+            s.visitor_id = l.visitor_id  -- Привязываем лиды к визитам
             and s.visit_date <= l.created_at
     -- Только если визит был до или в момент создания лида
     where s.medium in ('cpc', 'cpm', 'cpa', 'youtube', 'cpp', 'tg', 'social')
@@ -36,7 +36,7 @@ costs as (
         utm_medium,  -- UTM-тип трафика
         utm_campaign  -- UTM-кампания
     from vk_ads  -- Таблица расходов ВК
-    group by 1, 3, 4, 5
+    group by campaign_date::date, utm_source, utm_medium, utm_campaign
 
     union all
 
@@ -47,45 +47,40 @@ costs as (
         utm_medium,
         utm_campaign
     from ya_ads  -- Таблица расходов Яндекс
-    group by 1, 3, 4, 5
+    group by campaign_date::date, utm_source, utm_medium, utm_campaign
 )
 
 -- Основной запрос, соединяющий данные визитов с расходами и считающий метрики
 select
     vl.visit_date::date as visit_date,  -- Дата визита
-    count(*) as visitors_count,  -- Количество визитов
     vl.utm_source,  -- UTM-источник
     vl.utm_medium,  -- UTM-тип трафика
     vl.utm_campaign,  -- UTM-кампания
     c.daily_spent as total_cost,  -- Общие расходы на рекламу в этот день
-    count(*) filter (where vl.lead_id is not null) as leads_count,
-    -- Количество лидов
-    count(*) filter (where vl.status_id = 142) as purchases_count,
-    -- Количество покупок (лиды со статусом покупки)
-    coalesce(sum(vl.amount) filter (where vl.status_id = 142), 0) as revenue
-    -- Доход от покупок
+    count(*) as visitors_count,  -- Количество визитов
+    count(*) filter (where vl.lead_id is not null) as leads_count,  -- Количество лидов
+    count(*) filter (where vl.status_id = 142) as purchases_count,  -- Количество покупок
+    coalesce(sum(vl.amount) filter (where vl.status_id = 142), 0) as revenue  -- Доход от покупок
 from visitors_and_leads as vl
 left join costs as c  -- Левый джойн с таблицей расходов
     on
         vl.utm_source = c.utm_source  -- По UTM-источнику
         and vl.utm_medium = c.utm_medium  -- По типу трафика
         and vl.utm_campaign = c.utm_campaign  -- По кампании
-        and vl.visit_date::date = c.campaign_date::date  -- И по дате
+        and vl.visit_date::date = c.campaign_date  -- И по дате
 group by
     vl.visit_date::date,
     vl.utm_source,
     vl.utm_medium,
     vl.utm_campaign,
     c.daily_spent
--- Группируем по дате, источнику, типу трафика, кампании и расходам
 order by
     revenue desc nulls last,
     visitors_count desc,
-    visit_date,
-    vl.utm_source,
-    vl.utm_medium,
-    vl.utm_campaign;
--- Сортируем сначала по доходу, затем по количеству визитов
+    visit_date asc,
+    vl.utm_source asc,
+    vl.utm_medium asc,
+    vl.utm_campaign asc;
 
 -- Находим затраты на рекламу по дням
 select
@@ -93,7 +88,7 @@ select
     'VK' as ad_source,
     sum(daily_spent) as total_spent
 from vk_ads
-group by campaign_day
+group by campaign_date::date
 
 union all
 
@@ -102,5 +97,5 @@ select
     'Yandex' as ad_source,
     sum(daily_spent) as total_spent
 from ya_ads
-group by campaign_day
-order by campaign_day, ad_source;
+group by campaign_date::date
+order by campaign_day asc, ad_source asc;
