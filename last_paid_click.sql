@@ -12,13 +12,14 @@ WITH last_paid_clicks AS (
         l.status_id
     FROM sessions AS s
     LEFT JOIN leads AS l
-        ON s.visitor_id = l.visitor_id
-        AND s.visit_date <= l.created_at
+            ON s.visitor_id = l.visitor_id
+            AND s.visit_date <= l.created_at
     WHERE s.medium IN ('cpc', 'cpm', 'cpa', 'youtube', 'cpp', 'tg', 'social')
     ORDER BY s.visitor_id, s.visit_date DESC
 )
 
 SELECT *
 FROM last_paid_clicks
-ORDER BY amount DESC NULLS LAST, visit_date ASC, utm_source ASC, utm_medium ASC, utm_campaign ASC
+ORDER BY amount DESC NULLS LAST, visit_date ASC, utm_source ASC, 
+utm_medium ASC, utm_campaign ASC
 LIMIT 10;
