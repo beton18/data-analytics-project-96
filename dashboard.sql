@@ -36,7 +36,7 @@ costs as (
         utm_medium,  -- UTM-тип трафика
         utm_campaign  -- UTM-кампания
     from vk_ads  -- Таблица расходов ВК
-    group by campaign_date::date, utm_source, utm_medium, utm_campaign
+    group by 1, 2, 3, 4, 5
 
     union all
 
@@ -47,7 +47,7 @@ costs as (
         utm_medium,
         utm_campaign
     from ya_ads  -- Таблица расходов Яндекс
-    group by campaign_date::date, utm_source, utm_medium, utm_campaign
+    group by 1, 2, 3, 4, 5
 )
 
 -- Основной запрос, соединяющий данные визитов с расходами и считающий метрики
@@ -68,27 +68,15 @@ left join costs as c  -- Левый джойн с таблицей расход�
         and vl.utm_medium = c.utm_medium  -- По типу трафика
         and vl.utm_campaign = c.utm_campaign  -- По кампании
         and vl.visit_date::date = c.campaign_date  -- И по дате
-group by
-    vl.visit_date::date,
-    vl.utm_source,
-    vl.utm_medium,
-    vl.utm_campaign,
-    c.daily_spent
-order by
-    revenue desc nulls last,
-    visitors_count desc,
-    visit_date asc,
-    vl.utm_source asc,
-    vl.utm_medium asc,
-    vl.utm_campaign asc;
-
+group by 1, 2, 3, 4, 5
+order by 1 asc, 2 asc, 3 asc, 4 asc, 6 desc, 9 desc nulls last;
 -- Находим затраты на рекламу по дням
 select
     campaign_date::date as campaign_day,
     'VK' as ad_source,
     sum(daily_spent) as total_spent
 from vk_ads
-group by campaign_date::date
+group by 1
 
 union all
 
@@ -97,5 +85,5 @@ select
     'Yandex' as ad_source,
     sum(daily_spent) as total_spent
 from ya_ads
-group by campaign_date::date
-order by campaign_day asc, ad_source asc;
+group by 1
+order by 1 asc, 2 asc;
