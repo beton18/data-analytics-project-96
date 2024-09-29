@@ -58,9 +58,9 @@ select
     vl.utm_campaign,  -- UTM-кампания
     c.daily_spent as total_cost,  -- Общие расходы на рекламу в этот день
     count(*) as visitors_count,  -- Количество визитов
-    count(*) filter (where vl.lead_id is not null) as leads_count,  -- Количество лидов
-    count(*) filter (where vl.status_id = 142) as purchases_count,  -- Количество покупок
-    coalesce(sum(vl.amount) filter (where vl.status_id = 142), 0) as revenue  -- Доход от покупок
+    count(*) filter (where vl.lead_id is not null) as leads_count,
+    count(*) filter (where vl.status_id = 142) as purchases_count,
+    coalesce(sum(vl.amount) filter (where vl.status_id = 142), 0) as revenue
 from visitors_and_leads as vl
 left join costs as c  -- Левый джойн с таблицей расходов
     on
